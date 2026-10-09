@@ -8,6 +8,49 @@ For amendment procedure see `Plan.md` §6. For settled design decisions made up 
 
 ## 2026-10-09 — running log (small decisions, kept with the amendments)
 
+- **Dev/test uses fast local stores; production uses Qdrant + Neo4j** (2026-10-09,
+  user-ordered). For iterating and end-to-end testing without Docker, the harness
+  reads the SAME graph the real pipeline builds but held in-process:
+  - **Fast vector store:** `graphrag.stores.MemoryVectorStore` (in-process numpy cosine)
+    instead of Qdrant. **Fast graph store:** the in-memory `graphrag.graph.Graph`
+    (nodes/edges dicts) instead of Neo4j. **Embeddings:** `MiniLMEmbedder` (same as
+    production; `StubEmbedder` fallback). **Same LLM** (hosted Qwen) and **same Laya**
+    (System-1 routing) as production — only the STORES differ.
+  - How: run the **real** pipeline with `--skip-stores --skip-reports`, which builds +
+    saves `data/graph.json` via hosted-Qwen extraction + Laya merge judging but skips the
+    Qdrant/Neo4j writes. Then `dev/build_fast_engine.py` loads `graph.json` into
+    `MemoryVectorStore` + the in-memory graph and returns the SAME `QueryEngine`
+    production uses. `dev/run_e2e.py` wires it to `medharness`.
+  - Dev tooling lives in **`dev/`** (not product, not production indexer). Production
+    indexing stays `graphrag/pipeline.py` → Qdrant + Neo4j. Product code
+    `src/medharness/` does not import `dev/`.
+- **Extraction gotcha (hosted Qwen, llama.cpp):** batching 4 chunks/prompt with
+  `reasoning_effort` set returns completions with **no JSON** (`InvalidOutputError`).
+  Works reliably with `--batch 1` + `GRAPHRAG_REASONING_EFFORT=none` (param not sent).
+  The tunnel is also slow (~1 chunk/min under load), so extract the small
+  `data/corpus_min/` for fast e2e, full `data/corpus_test/` in the background.
+- **Track H `harness/` deprecated → `deprecated/harness/`** (2026-10-09, user-ordered
+  cleanup). It was the generic coding-agent ReAct loop — a *mechanics donor* for the
+  medical harness, never the product. Verified **zero code dependency** between
+  `harness/` and `src/medharness/` before the move. `medharness` still imports clean;
+  52 tests + arch gate unaffected. Reference copy only; `deprecated/README.md` explains
+  why. Product remains Track A in `src/medharness/`.
+- **Track A harness built S0–S8** (2026-10-09, user-ordered, simple stores for dev
+  speed). Package `src/medharness/` (renamed from `src/harness` — collided with Track
+  H's top-level `harness/` on the import path). Flow: `orchestrator.assess()` = L1 Laya
+  decides → L2 `rules/engine.py` escalates (deterministic, sect 9 thresholds v1, 5
+  branches, downgrade-forbidden, `llm_called:false`) → L3 Qwen explains (only if not
+  escalated). **Vector = in-memory numpy cosine, graph = networkx** (no Qdrant/Neo4j;
+  drop-in adapters keep the interface — the sect 7.4 swap is recorded here). Generation
+  = hosted Kaggle Qwen via client-side tool calling (regex-parsed tool_call text, no
+  `tools=` param — the server ignores it). 39 tests green; `scripts/check_architecture.py`
+  proves `rules/` imports only `contracts` + only `engine.py` builds `Escalation`
+  (verified fail-closed on a bad import). Escalation isolation proven dynamically: a
+  raising-LLM stub is never touched on any escalated case (`tests/test_orchestrator.py`).
+  Run offline: `python -m medharness.demo`; live: `MEDH_LIVE=1` / `MEDH_ENABLE_LLM=1`.
+  **Not yet:** real MiniLM embeddings wired into `kb.py` (S1 used a hashed-token
+  embedder), a live Laya/MEDH_LIVE run, evals + baseline.
+- **Generative backend moved to hosted Kaggle Qwen + client-side tool calling** (2026-10-09, user-ordered): `qwen2.5-32b-instruct` (Q4_K_M GGUF, `bartowski/Qwen2.5-32B-Instruct-GGUF`) served by llama-cpp-python server on Kaggle T4 x2 behind a Cloudflare tunnel, OpenAI-compatible at `{tunnel}/v1`, dummy key `sk-local`, current URL `https://pond-breathing-foto-advocate.trycloudflare.com/v1` (URLs rotate on restart — override via `KAGGLE_LLM_BASE_URL`). Host script saved in `docs/hosting_qwen_kaggle.md`. **Tool-schema change:** the llama.cpp server has NO native tool support, so the OpenAI `tools=` parameter path is abandoned — schemas now live in the system prompt in Qwen's `<tools>` XML format, the model emits `<tool_call>{"name":…,"arguments":…}</tool_call>` as plain text, the client regex-parses it (`parse_tool_calls`), executes locally, and returns results in `<tool_response>` user turns. Proved live in `test/local_kaggle_llm.py` (real `<tool_call>` for `get_weather` captured, final grounded answer returned).
 - **Track H P1 core done** (2026-10-09): `harness/agent/{prompt,llm,loop}.py`,
   `tools/{registry,files}.py`, `main.py`, 7 unittest tests green, live exam 1
   ("What is 2+2?" → `4`, 1 turn, 0 tool calls) via Zen `space-bunny-free`.

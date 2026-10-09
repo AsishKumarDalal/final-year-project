@@ -35,6 +35,62 @@ Durable learnings for this repo: things a future agent would need again and coul
   only ~2.5 GB free. 1.5B fits; do NOT pull 3B+ without stopping something.
   Expect ~10-15s/turn on 2 CPU cores — fine for dev, not for batch indexing.
 
+### 2026-10-09 — Dev/test fast stores + the extraction gotcha (hosted Qwen)
+
+- **Dev/test = fast local stores; production = Qdrant + Neo4j.** To test end-to-end
+  without Docker, run the REAL pipeline with `--skip-stores --skip-reports` (hosted-Qwen
+  extraction + Laya merge → saves `data/graph.json`, skips Qdrant/Neo4j), then
+  `dev/build_fast_engine.py` loads that graph into `MemoryVectorStore` (fast vector) +
+  the in-memory `graphrag.graph.Graph` (fast graph) → the SAME `QueryEngine`. Same LLM,
+  same Laya, only the STORES differ. Dev tooling lives in `dev/`; `src/medharness/` never
+  imports it. Recorded in decisions.md + runbook.md.
+- **Extraction gotcha (hosted Qwen via llama.cpp):** the pipeline's default `--batch 4`
+  + `reasoning_effort` returns completions with **no JSON** (`InvalidOutputError: no JSON
+  object in completion`) — all chunks fail. **Fix: `--batch 1` + `GRAPHRAG_REASONING_EFFORT=none`**
+  (the param is not sent; llama.cpp emits clean `{"results":[...]}` JSON). Verified a
+  single small call returns valid triples JSON in ~10 s.
+- **The tunnel is SLOW under extraction load:** ~1 chunk/min (each 2500–4800-char chunk
+  through the 32B model over Cloudflare). Don't extract the full 52-chunk corpus live
+  expecting speed — use `data/corpus_min/` (one doc) for a fast e2e, full corpus in the
+  background. `pkill -f graphrag.pipeline` SIGTERMs your own shell too — check pgrep first.
+
+### 2026-10-09 — Track A harness S0–S8 built (simple stores, dev speed)
+
+- **Layout:** `src/medharness/` — `contracts/` (pydantic, only thing rules imports),
+  `decision/` (Laya http + fixture adapters), `rules/` (thresholds + engine),
+  `tools/` (lookup + kb + registry role matrix), `generation/` (qwen client-side
+  tool loop + policy), `orchestrator.py`, `service/app.py`, `demo.py`. 39 tests in
+  `tests/`, no network. `python -m medharness.demo` runs offline on 6 synthetic cases.
+- **Delimiter gotcha (bit me 3x):** writing the literal ``, `</tool_response>` tags
+  into source/tests is fragile — the toolchain consumes them mid-write. Build them
+  from parts: `_TC_O = "<" + "tool_call>"`; tests import `_TC_O/_TC_C` and wrap bodies
+  with a helper. Never paste the full tag as a literal.
+- **Path gotcha (bit me 2x):** `data/` is repo-root, so from `src/medharness/<pkg>/*.py`
+  it is `parents[3]`, not `parents[2]`. Same off-by-one hit client.py and lookup.py.
+- **Escalation is the safety spine:** `orchestrator.assess()` runs Laya→rules and
+  returns on escalation WITHOUT constructing the Qwen client. `test_orchestrator` swaps
+  a `RaisingLLM` that throws if touched; every escalated case asserts `llm_called=false`
+  and the stub untouched. Never refactor assess() to build the LLM before the rule check.
+- **Next:** swap the hashed-token embedder in `tools/kb.py` for real MiniLM
+  (`embed(texts)->vectors` seam), a live `MEDH_LIVE=1` run, then M11 evals + baseline.
+
+### 2026-10-09 — search_external_docs: two-tier retrieval (internal KB → full graph walk)
+
+- **Mechanism (S9):** the LLM tries `kb_search` (internal simple stores) first; when
+  that returns too little it calls `search_external_docs(query, mode)`, which runs a
+  FULL graph walk and returns docs as `text_unit:` facts; the LLM then answers grounded
+  in them. System prompt teaches the fallback; the tool is permission-gated like the rest.
+- **Adapters (`tools/external_search.py`):** `GraphWalkExternalSearch` (offline — real
+  2-hop networkx walk via `GraphStore.walk_edges`, seeds = name-match ∪ vector, facts =
+  edge provenance `head --rel--> tail | chunk text`). `GraphRAGExternalSearch` (live —
+  wraps `graphrag.query.QueryEngine.ask()` for real Qdrant+Neo4j local AND community).
+- **Citation rule holds:** only `text_unit:` ids may cite facts; `community:` summaries
+  are filtered out (D20). Global/community mode degrades to a named refusal offline
+  (needs the live index) — never a fake answer.
+- **Wiring:** `Orchestrator` holds `llm_client` + `external_search`; `_bound_dispatch`
+  injects external_search into the registry chokepoint. `service/app.build_external_search()`
+  picks live-vs-offline by `MEDH_LIVE`.
+
 ## Notes
 
 ### 2026-10-09 — Hosted System-1 API probe (Liquid `d1:free`) — measured, then rejected
@@ -152,3 +208,49 @@ What the probe actually measured (2026-10-09):
 - `space-bunny-free` intermittently **429 rate-limited**; earlier extraction worked,
   later probes throttled. Retry after minutes, not seconds.
 - Catalogue: `GET https://opencode.ai/zen/v1/models` (42 models total, 9 free).
+
+### 2026-10-09 — Track A build: simple stores for dev speed (user order)
+
+- **Vector = in-memory numpy cosine** (`src/medharness/stores/vector.py`),
+  **graph = networkx in-process** (`stores/graph.py`) — no Qdrant/Neo4j/Docker
+  for dev speed. Drop-in adapters with the same upsert/search/MERGE-walk
+  interface stay the goal; PROMPT.md sect 7.4 still says Qdrant+Neo4j.
+- **Package named `medharness`** — `src/harness` collided with Track H's
+  top-level `harness/` dir (CWD shadowing: repo-root `harness/__init__.py`
+  won over the installed package). Verified: `import harness` from repo root
+  resolved to Track H.
+- **Embeddings:** MiniLM not cached on this box (first `SentenceTransformer`
+  load timed out cold); S1 verified with a 32-dim hashed-token embedder
+  (chest-pain query ranked `chest_pain::0` 0.638). Real MiniLM plugs into the
+  same `embed(texts)->vectors` seam later.
+- Seed: 4 synthetic docs / 14 entities / 4 MAY_SIGNAL edges, chunk ids
+  `Doc::N` as stable provenance.
+- **S2 decision client:** `decision/client.py` (parse Laya answers → typed
+  `LayaVerdict`), `http_adapter.py` (live `POST /v1/systemone`), `fixture_adapter.py`
+  (20 synthetic cases; tests use this, no network). `full_question_set()` sends
+  acuity + 8 flags + extraction + guard in ONE batched request.
+- **Abstain gotcha (cost me 2 debug rounds):** `abstained` = min confidence over
+  SALIENT keys only (acuity + flags with p≥0.30). Sweeping all 8 flags lets a
+  quiet sentinel flag's defaulted confidence (0.0, or the `_noul` 0.25 at p≈0.5)
+  force a false abstain. Never gate safety on a flag nobody raised.
+- **Fixture sentinel:** `_noul(p)` sets confidence 0.25 when |p−0.5|≤0.2 — so a
+  salient borderline flag (e.g. dyspnea p=0.55) must be recorded with an
+  explicit high confidence, else parse_verdict abstains. Real Laya gives a real
+  confidence; the synthetic helper was the culprit, not the parser.
+
+### 2026-10-09 — Hosted Kaggle Qwen replaces Zen/Ollama for generation; tool schema goes client-side
+
+- **Model:** `qwen2.5-32b-instruct` Q4_K_M GGUF on Kaggle T4 x2 via llama-cpp-python
+  server + Cloudflare tunnel (host script in `docs/hosting_qwen_kaggle.md`).
+  Client: `OpenAI(base_url="https://pond-breathing-foto-advocate.trycloudflare.com/v1", api_key="sk-local")`.
+  Tunnel URLs rotate — pass the new one via `KAGGLE_LLM_BASE_URL`, model stays.
+- **Tool-schema change (the important part):** the server does NOT support the
+  OpenAI `tools=` parameter, so schemas moved INTO the system prompt as Qwen
+  `<tools>` XML; the model writes `<tool_call>{"name":…,"arguments":…}</tool_call>`
+  as plain text; `parse_tool_calls()` regex-extracts it (strips ``` fences,
+  coerces string `arguments`, reports unclosed blocks); results return as
+  `<tool_response>` user turns. Code: `test/local_kaggle_llm.py`.
+  Verified live: raw reply contained a real `<tool_call>` for `get_weather`,
+  parser extracted it, loop returned the grounded answer.
+- **Do not** send `tools=` to this endpoint — it is silently ignored. Any future
+  medical tool (`kb_search`, etc.) follows the same client-side pattern.

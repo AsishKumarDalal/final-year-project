@@ -166,6 +166,14 @@ class Settings:
     def from_env(cls) -> "Settings":
         load_dotenv()
         root = Path(__file__).resolve().parents[1]
+        # Reasoning control: absent var -> "minimal" (Zen default); explicit
+        # empty or "none" -> None (no parameter sent — required for local
+        # Ollama models like qwen2.5:1.5b that reject thinking parameters).
+        _re_raw = _env("GRAPHRAG_REASONING_EFFORT", "__unset__")
+        _reasoning = (
+            "minimal" if _re_raw == "__unset__"
+            else (None if _re_raw is None or _re_raw.strip().lower() in ("", "none") else _re_raw.strip())
+        )
         return cls(
             repo_root=root,
             corpus_dirname=_env("GRAPHRAG_CORPUS_DIR", "corpus_test") or "corpus_test",
@@ -177,7 +185,7 @@ class Settings:
             ),
             max_triples=_env_int("GRAPHRAG_MAX_TRIPLES", 10),
             max_mentions=_env_int("GRAPHRAG_MAX_MENTION_TOKENS", 7),
-            reasoning_effort=_env("GRAPHRAG_REASONING_EFFORT", "minimal") or None,
+            reasoning_effort=_reasoning,
             request_timeout_s=_env_int("GRAPHRAG_TIMEOUT_S", 120),
             max_retries=_env_int("GRAPHRAG_MAX_RETRIES", 3),
             qdrant_url=_env("QDRANT_URL", "http://127.0.0.1:6333") or "",

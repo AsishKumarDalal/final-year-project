@@ -326,7 +326,9 @@ class Extractor:
             # Compatibility fallback: a backend that does not understand
             # reasoning_effort 400s the request. Drop the parameter once and
             # retry — without it, not instead of failing.
-            if self.reasoning_effort is not None and "reasoning" in str(exc).lower():
+            if self.reasoning_effort is not None and any(
+                word in str(exc).lower() for word in ("reasoning", "thinking")
+            ):
                 del payload["reasoning_effort"]
                 started = time.perf_counter()
                 parsed, usage = self._post_with_retries(payload)

@@ -1,12 +1,60 @@
-# current_tasks.md — what is being built right now
+# current_tasks.md — Track A medical harness build (simple stores, dev speed)
 
-**Updated:** 2026-10-09 · **Status:** active — Track H docs done, P1 core next
+**Updated:** 2026-10-09 · **Status:** Track A built S0–S10, 52 tests green, `make arch` passes.
+Run `python3 -m medharness.demo` (fixtures, offline). Live: `MEDH_LIVE=1` (Laya :8000),
+`MEDH_ENABLE_LLM=1` (hosted Qwen). The old coding-agent `harness/` (Track H) was
+deprecated → `deprecated/harness/` (verified zero code dependency).
+**User order:** fast + simple. Vector = in-memory numpy cosine (no Qdrant).
+Graph = networkx in-process (no Neo4j). Embeddings = local MiniLM (already
+installed). Decisions = Laya (System-1). Generation = hosted Kaggle Qwen
+(`docs/hosting_qwen_kaggle.md`, client-side `<tool_call>` pattern — NO `tools=`
+param, server ignores it).
+**Amendment note:** `PROMPT.md` §7.4 says Qdrant+Neo4j in Docker; this build uses
+simple stores for dev speed. Drop-in adapters with the same interface stay the
+goal; record the swap in `docs/decisions.md` at S1.
+
+## Build order (S = step, each = code + test + tick below)
+
+- [x] **S0 scaffold** — `src/medharness/` tree, `pyproject`, arch-check script,
+      `data/questions/*.json` (§8 verbatim), `data/tables/*.json`, `.env.example`
+- [x] **S1 simple stores** — `stores/vector.py` (numpy cosine, top-k, filter) +
+      `stores/graph.py` (networkx entities/edges/`source_chunks`, 2-hop walk) +
+      `stores/seed_corpus.py` (4 docs → chunks → MiniLM embed → both stores)
+- [x] **S2 decision client** — `decision/client.py` Protocol + `http_adapter.py`
+      (Laya `POST /v1/systemone`, one batched call) + `fixture_adapter.py` (20+
+      recorded cases; ALL tests use fixture, no network)
+- [x] **S3 rule engine** — `rules/thresholds.py` v1 + `rules/engine.py` (§9, 5
+      branches, downgrade-forbidden) + boundary tests + `make arch` green
+- [x] **S4 lookup tools** — `tools/labs.py` + `tools/drugs.py` (pure file lookup,
+      `not_found` never guess) + `tools/registry.py` (role matrix §6)
+- [x] **S5 kb_search** — `tools/kb.py` over S1 stores (name-seeds ∪ vector-seeds
+      → 2-hop walk ∪ chunk fetch → rerank → top-k; `text_unit:`-only ids,
+      hard-fail unresolvable; `mode:none` allowed; stores-down → degraded)
+- [x] **S6 generation** — `generation/qwen_client.py` (client-side tool loop from
+      `test/local_kaggle_llm.py`) + `generation/policy.py` (refusals, crisis
+      verbatim from config, banned-phrase, citation gate)
+- [x] **S7 orchestrator** — `orchestrator.py assess()` L1→L2→[L3]; raising-LLM
+      stub proves 0 calls on escalation; verbatim instruction; full trace §12;
+      byte-identical decisions
+- [x] **S8 edge + demo** — FastAPI `POST /assess`, `GET /health`, role header;
+      end-to-end demo on synthetic cases (escalated + safe)
+- [x] **S9 external docs tool** — `tools/external_search.py`: `search_external_docs(query, mode)`.
+      Two-tier retrieval: internal `kb_search` first; when the model judges it
+      insufficient it calls `search_external_docs` → **full graph walk** (local
+      2-hop over networkx offline, or `graphrag.QueryEngine` local+community live)
+      → docs return as `text_unit:` facts → LLM answers grounded. `GlobalSearchClient`
+      degrades to a named refusal offline. Verified: scripted kb→external→answer cites
+      `text_unit:chest_pain::0`. 46 tests green.
+
+## Now / next / later — archive (pre-Track-A state, kept for record)
+
+### Was-right-now (2026-10-09, superseded by the build above)
 
 ## Right now
 
-- 🔴 **Track H P1 core is the build**: `harness/agent/{prompt,llm}.py` →
-  `tools/registry.py` → `agent/loop.py` (sequential) → `main.py`. Blocked on
-  one approval: `pip install openai` (Implement.md S2 — ask before installing).
+- 🔴 *(archived)* **Track H P1 core was a build**: the old coding agent
+  `harness/` — now **deprecated**, moved to `deprecated/harness/`. Superseded by
+  the medical harness (`src/medharness/`).
 - 🔴 **Fresh pipeline run in progress** (background): 16-doc corpus (~700 KB,
   191 chunks), parallel-reports patch live. Old run killed, artifacts + stores
   wiped. Timing lands in `data/index_run.json` + `data/rag-cost.json` when done —
@@ -43,7 +91,7 @@ system and must not be tangled together.
 
 | # | Deliverable | Lives in | Purpose |
 |---|---|---|---|
-| **A** | **The medical decision-support harness** | `src/harness/`, `PROMPT.md`, `Plan.md` §2 | The product. Triage, escalation, cited explanation. Unbuilt. |
+| **A** | **The medical decision-support harness** | `src/medharness/`, `PROMPT.md`, `Plan.md` §2 | The product. Triage, escalation, cited explanation. Built (S0–S10). |
 | **B** | **The GraphRAG indexer** | `graphrag/` (this new folder) | The knowledge-graph builder that produces the index deliverable B reads. **Separate project.** |
 
 **The one interface between them:** deliverable B writes a graph and vector
@@ -55,7 +103,7 @@ index; deliverable A's `kb_search` tool reads it. B is **build-time and offline*
 ## Right now: coding deliverable B — the GraphRAG system
 
 **Folder:** `graphrag/` — a self-contained Python package with its own tests,
-its own config, and no dependency on `src/harness/`.
+its own config, and no dependency on the medical harness.
 
 **Built to the design record in `docs/rag_docs/`:**
 
