@@ -44,7 +44,7 @@ So: **index the library first → then the safety core → then wire it all toge
    could change a safety outcome, the design is broken.
 2. **Fix the code, never the test, never the threshold, never the target.** A failing number is a result
    to report, not a setting to adjust until it looks green.
-3. **Build only what this milestone's list says.** Anything else is a note for `docs/TODO.md`, not a change.
+3. **Build only what this milestone's list says.** Anything else is a note for `current_tasks.md`, not a change.
 
 ---
 
@@ -137,7 +137,7 @@ These are the specific failure modes. When you feel one, log it instead of actin
 
 ### 3.3 Deferred work log
 
-Maintain `docs/TODO.md`. One line per item:
+Maintain `current_tasks.md`. One line per item:
 
 ```
 - [ ] M-M17  cache lookups  — found while doing M4  — not fixed, out of scope
@@ -194,7 +194,7 @@ Deferred documentation is the same failure as a skipped test, wearing a differen
 | `docs/tools.md` | M5 | M5, M6, M7 | Each tool: signature, returns, data source, provenance |
 | `docs/evaluation.md` | M11 | M11, M15 | Metric definitions, how to run, targets, why each exists |
 | `docs/limitations.md` | M12 | M12, M15 | What the system cannot do |
-| `docs/TODO.md` | M0 | Continuously | Deferred work (§3.3) |
+| `current_tasks.md` | M0 | Continuously | Deferred work (§3.3) |
 
 ### 5.3 Generated reports are not documentation
 
@@ -313,7 +313,7 @@ Before every commit:
 [ ] Documentation updated for what changed
 [ ] docs/decisions.md has an entry if I made a judgement call
 [ ] No secrets, no real patient data, no hand-edited out/ report
-[ ] Any found-but-unfixed issue is in docs/TODO.md
+[ ] Any found-but-unfixed issue is in current_tasks.md
 [ ] Completion report emitted, with bad news included
 [ ] Commit message reflects what I actually verified
 ```

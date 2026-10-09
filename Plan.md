@@ -195,6 +195,47 @@ Phase A ends at **M12**. Nothing in stage 6 may begin before the baseline report
 
 ---
 
+## 1b. Track B — the GraphRAG indexer (a second deliverable)
+
+**Added 2026-10-09 by amendment** (`docs/decisions.md`). This repository carries **two
+independent deliverables**, and they must not be tangled together.
+
+| | Track A | **Track B** |
+|---|---|---|
+| What | the medical decision-support harness | **the GraphRAG indexer** |
+| Lives in | `src/harness/`, `Plan.md` §2 below | **`graphrag/`** |
+| Milestones | M0–M15, unchanged | its own plan: **`graphrag_plan.md`** |
+| Spec | `PROMPT.md` | `docs/rag_docs/` (the design record) |
+| Produces | a JSON/HTTP service | a graph + vector index |
+
+**The single interface between them:** Track B writes the index; Track A's
+`kb_search` reads it. **Track B never imports Track A, Track A never imports
+Track B, and Track B is build-time and offline** — it never runs inside a test,
+a request path, or `make validate` (`Plan.md` D19).
+
+**Why this needed an amendment:** `graphrag/` sits outside §4.1's layout, and
+`docs/rag_docs/` introduces a different design lineage from
+`docs/rag_implementationplan.md`. Rather than either overwrite the other, the
+two are kept side by side and the boundary is written down:
+
+| Question | Track A's answer | Track B's answer |
+|---|---|---|
+| Extraction | n/a — the harness never extracts | **LLM per chunk.** The `docs/rag_docs/NER_model.md` encoder swap is **rejected** |
+| Rerank / route | D17: Laya routes the search mode | `rag_docs/` two-door seeds, evidence rerank, System-1 router + guardrail |
+| System-1 model | Laya over HTTP (D2) | the **same local Laya** at `127.0.0.1:8000` — routing and judging only, never generation |
+| Store | consumes it | Qdrant + Neo4j in Docker |
+
+**Track B's execution order** — test corpus first, main corpus second:
+
+1. Unit suite (no network, no key) → 2. extraction adapter → 3. merge funnel →
+4. stores + local MiniLM → 5. **Wikipedia medical test corpus** indexed locally →
+6. query layer → 7. **main corpus** via the GitHub Actions batch job, checkpointed
+to HuggingFace every 1–1.5 h (`graphrag_plan.md` §4).
+
+Current status and what is blocked: **`current_tasks.md`**.
+
+---
+
 ## 2. Milestones
 
 ### M0 — Scaffold and gates

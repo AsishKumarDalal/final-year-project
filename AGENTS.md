@@ -1,5 +1,5 @@
 # AGENTS.md
-
+soory docs/decisions.md and docs/decisions.md is same keep any one that is the log of decissions 
 > ## ⏳ Index first — model access lasts 2–3 days from 2026-10-08
 >
 > GraphRAG **indexing** consumes model tokens; everything else does not. Order is:
@@ -35,6 +35,7 @@ The three markdown files at root are the entire deliverable so far. **There is n
 | `AGENTS.md` | **This file** — repo facts, traps, gates, invariants | Session start | Only when a repo fact changes (new file, new trap, gate moved) | ✅ |
 | `memory.md` | **Agent's free-form learnings** — mistakes, quirks, dead ends, corrections | Session start | ✏️ **any time** — the one file exempt from scope rules | ✅ blank |
 | `README.md` | Public entry point — what this is, setup, how to run, non-goals | Before writing any docs | ✏️ at M0, then kept current | ❌ **M0** |
+|✏️`current_tasks.md` |says the immediate tasks and immediate vision of what is currently being  worked on(evry time evry turn evaluate and update this) (put red dots there where a human needs to give attention)|   every time  |write any time when you feel |yes|
 
 ### `docs/` — living project documentation
 
@@ -42,7 +43,7 @@ Update in the **same commit** as the code it describes.
 
 | File | What it is | Read | Write | Exists? |
 |---|---|---|---|---|
-| `docs/decisions.md` | **Append-only amendment log** — what changed, why, the cause | Before proposing any reorder or amendment | ✏️ append only — never rewrite an entry | ✅ |
+| `docs/decisions.md` | **The single decision log** — amendments (what changed, why, the cause) **and** the running log of every small-to-big decision, newest first. `memory.md` keeps learnings; this file keeps the log | Before proposing any reorder or amendment | ✏️ append only — never rewrite an entry | ✅ |
 | `docs/rag_implementationplan.md` | GraphRAG design — index pipeline, query modes, Docker, costs | Before touching M6 | ✏️ with M6 | ✅ |
 | `docs/reference/` | Third-party notes (Hermes). **Reference only — never a dependency** | When considering adopting something | ✏️ rarely, to record a finding | ✅ |
 | `docs/architecture.md` | Three layers, `Plan.md` §4 dependency contracts, data flow | When changing structure | ✏️ same commit as code | ❌ M0 |
@@ -50,7 +51,7 @@ Update in the **same commit** as the code it describes.
 | `docs/tools.md` | Each tool's signature, returns, data provenance | When adding a tool | ✏️ same commit as code | ❌ M5 |
 | `docs/evaluation.md` | Metric definitions, how to run them, what each target is for | Before running metrics | ✏️ same commit as code | ❌ M11 |
 | `docs/limitations.md` | What the system cannot do, stated plainly | Before claiming anything | ✏️ any time a limitation is found | ❌ M0 |
-| `docs/TODO.md` | Deferred work — one line each, with the milestone | When scope discipline kicks in | ✏️ any time something is out of scope | ❌ M0 |
+
 
 ### Not documentation — do not treat as docs
 
@@ -179,7 +180,7 @@ These are deliberate. Treat a request to remove one as a defect report, not a ta
 - **Never weaken a test, skip it, or delete it** to make a gate green.
 - **Never tune a safety threshold to hit a target number.** Thresholds in `rules/thresholds.py` are versioned safety parameters (`Plan.md` D13).
 - **A failing blocking metric is a finding, not a defect.** Record it in the baseline report. Don't lower the target in `PROMPT.md` §15.2.
-- **Scope discipline:** build only the current milestone's Build list. Found something else? It goes in `docs/TODO.md`, not the diff. Named temptations are in `Implement.md` §3.2.
+- **Scope discipline:** build only the current milestone's Build list. Found something else? It goes in `current_tasks.md`, not the diff. Named temptations are in `Implement.md` §3.2.
 - **Docs update in the same commit as the code.** A milestone is not done until its docs land with it.
 
 ## Planning

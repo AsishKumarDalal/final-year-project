@@ -1,42 +1,64 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
-*.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# === Secrets — never committed (AGENTS.md Trap 4) ===
 .env
+.env.*
+!.env.example
 
-# Executables
-*.exe
-*.out
-*.app
+# === Generated evidence — never hand-edited ===
+out/
 
-# debug information files
-*.dwo
+# === Local index / Docker volumes / corpora ===
+# Qdrant + Neo4j volumes live under data/ (see graphrag/compose.yaml).
+# Extraction cache, corpora, and index JSON/JSONL are all regenerable.
+data/
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Distributions / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+*.pkl
+*.pickle
+
+# Test / lint / typecheck caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# === Harness runtime state (see docs/runbook.md) ===
+sessions.db
+sessions.db-*
+MEMORY.md
+todo.md
+
+# === Logs / temp ===
+*.log
+*.tmp
+*.bak
+/tmp/opencode/
+
+# === OS / editors ===
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
