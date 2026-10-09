@@ -15,6 +15,138 @@
 
 ---
 
+## Goals in plain language (for humans)
+
+*Orientation only. Nothing in this section is normative — `PROMPT.md` is the specification and §2 below
+is the binding milestone list. If the two ever disagree, §2 wins. This section exists so a reviewer,
+supervisor, or new team member can understand the project without reading the specification.*
+
+### The one sentence
+
+A tool that reads a short written description of a patient, decides **how urgent** it is and **whether it
+contains warning signs of danger**, and when danger is present it stops and says *"get a human now"* using
+fixed rules with no AI involved at that point. Otherwise it writes a plain-language explanation that must
+point back to real source documents. It never names a disease and never recommends treatment.
+
+### Why the build order looks unusual
+
+We have temporary access to AI models for **2–3 days**. Only one stage of the whole project actually
+consumes them: turning our document library into a searchable knowledge base. Everything else — the rules,
+the wiring, the service, the tests — costs nothing and can be built later. So that stage goes **first**,
+even though it is not the part that keeps patients safe. The safety-critical parts follow immediately
+afterwards, and still ship *before* anything is connected together.
+
+### The seven stages
+
+| # | Stage | In plain language | What you end up with |
+|---|---|---|---|
+| 1 | **Foundation** (M0–M1) | Build the empty house and the rules for building in it | Folder layout, the "no file may reach the wrong thing" checker, and the fixed list of questions the model is always asked |
+| 2 | **Knowledge library** (M6a–M6c) | Turn a folder of medical documents into something searchable | Documents split into pieces, a map of which concepts relate to which, and short summaries — stored so answers can cite them. **Consumes the temporary models** |
+| 3 | **Safety core** (M4–M5) | Build the part that decides *"this needs a human now"* | A rule engine with no AI anywhere in it, plus reference tables for tests and medicines that are looked up rather than guessed |
+| 4 | **Teaching it to answer** (M6d, M7) | Let it search the library and write explanations | Three ways to search (direct lookup, about one thing, about the whole library), and a writing layer that must cite sources, refuse unsafe requests, and never claim a diagnosis |
+| 5 | **Assembly** (M8–M11) | Connect the three parts and expose them | One entry point, role-based permissions, an HTTP service, and the scorecard with its test questions |
+| 6 | **Honest report** (M12) | Publish what it got right **and wrong** | A written report with real measured numbers, including the bad ones |
+| 7 | **Teaching the model** (M13–M15) | Use our own labelled examples to make the model better | A before/after comparison on questions that were never used for tuning |
+
+### What is inside each stage
+
+**Stage 1 — Foundation.** Nothing clever: a structure that all later work must fit into, plus two guards.
+One guard stops any file from reaching the AI or the tools from inside the safety rules — that is what
+makes the emergency path safe *structurally* rather than by good intentions. The other freezes the exact
+questions the model is asked, so results stay comparable and can be replayed later.
+
+**Stage 2 — Knowledge library.** A folder of carefully chosen medical documents is split into passages.
+An AI reads each passage and lists the concepts it mentions and how they relate. Those concepts become a
+graph; nearby concepts are grouped and summarised. The result is a searchable library where an answer can
+say *"this came from document X, paragraph Y"*. **Every answer must point at a real passage from a real
+document** — never at a sentence the AI itself wrote, because a generated sentence is not evidence.
+
+**Stage 3 — Safety core.** Pure rules, no AI, no network. Given the model's probabilities, it decides
+escalate or not. It is deliberately boring so it can be exhaustively tested: every threshold is checked on
+both sides. Alongside it sit reference tables (normal lab ranges, medicine interactions) that are looked
+up in a file and return *"not found"* rather than guessing.
+
+**Stage 4 — Teaching it to answer.** The system learns to look things up before answering, and any
+sentence containing a fact must carry a source. It is told how to refuse: it will not name a disease, not
+suggest treatment, and if someone appears to be in danger it prints fixed crisis information from a
+configuration file — text the AI is not allowed to write.
+
+**Stage 5 — Assembly.** The three parts are wired together in one place and exposed as a small HTTP
+service. Whoever calls it declares their role, and the harness enforces what each role may see — a
+patient cannot look up medicine interactions even if they ask directly. Then the scorecard: several
+hundred synthetic test cases and a pass/fail gate.
+
+**Stage 6 — Honest report.** Every number the specification asks for is measured and published, **including
+the ones that look bad**. If the model performs poorly on medical text — expected, since it has no medical
+training — that is recorded as the finding, not hidden.
+
+**Stage 7 — Teaching the model.** Using a documented, provenance-recorded dataset of labelled examples,
+the decision model is fine-tuned, its confidence levels are recalibrated, and both versions are measured on
+the same held-out questions. If it does not improve, that is reported too.
+
+### How the pieces fit together
+
+```
+someone's description of a patient
+        │
+        ▼
+  MODEL decides          urgency level + warning-sign probabilities
+        │                (numbers only — it never writes prose)
+        ▼
+  RULES escalate         any warning sign over threshold → STOP.
+        │                a human is summoned. The AI is never contacted.
+        ▼  (only if not escalated)
+  AI explains            writes plain language, must cite sources,
+        │                may call tools, may refuse
+        ▼
+  RESPONSE               decision first, then escalation, then the explanation with its sources
+```
+
+The rule that makes it safe: **the model decides, the rules escalate, the AI explains, and tools are the
+only source of facts.** If any safety-relevant outcome could be changed by what the AI wrote, the design
+would be wrong — and that is enforced structurally and tested twice, not merely intended.
+
+### What it will never do
+
+- Never say what someone has. No diagnosis, no differential as a conclusion.
+- Never recommend treatment, doses, or starting/stopping a medicine.
+- No accounts, logins, or storing patient records. Callers declare their role; the harness enforces it.
+- No real patient data anywhere — every test case is synthetic or hand-written.
+- No user interface of any kind; the deliverable is a service.
+- **Not a medical device, not clinically validated, not for use in a hospital.**
+
+### How we will know whether it works
+
+The scorecard is deliberately harsh, and the first four items can fail the build:
+
+| Check | Required |
+|---|---|
+| A warning sign appears → human is summoned | **100%**, no exceptions |
+| A request for a diagnosis or treatment is refused | **100%** |
+| The AI is contacted on an emergency case | **0 times** |
+| Every cited source resolves to a real document passage | 100% |
+| Instructions hidden inside a document change nothing | 100% |
+| The same input gives the same answer every time | 100% |
+| Responds within the agreed time limits | measured and reported |
+| Urgency accuracy | **measured and reported, no target set in advance** |
+
+### What we already know will be hard
+
+- **The model has no medical training.** Expect poor urgency and warning-sign accuracy in the first
+  phase. That is why the first report measures rather than claims, and why the last stage exists.
+- **Warning signs are the hard part.** A model that misses a danger sign is the worst failure this system
+  can have, which is why the recall target is 100% and why the rule layer — not the model — makes the
+  final call.
+- **Labels are synthetic.** Performance on real patient presentations is unknown and must not be assumed.
+
+### The honest bottom line
+
+If this project succeeds, it is not because the AI is clever. It succeeds because a fast model proposes, a
+dumb deterministic layer decides, a writing layer explains with receipts, and the scorecard refuses to
+flatter any of it. The deliverable includes the failures.
+
+---
+
 ## 0. How to use this file
 
 Work through milestones in order. One milestone = one focused loop:

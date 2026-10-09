@@ -6,6 +6,107 @@ For amendment procedure see `Plan.md` §6. For settled design decisions made up 
 
 ---
 
+## 2026-10-09 — Human-readable goals added to `Plan.md` and `Implement.md`
+
+**Change:** two non-normative orientation sections. `Plan.md` gains **"Goals in plain language (for
+humans)"** before §0; `Implement.md` gains **"§0 What we are building, in plain language"**. No existing
+section was edited, removed, renumbered, or reordered.
+
+**Cause (the finding):** the specification is written for implementers. A reviewer, supervisor, or new
+team member cannot answer "what is this actually for, and why is it built in this order?" without reading
+a 565-line specification that opens with performance budgets. That is a real audience gap, and it was
+raised explicitly — the earlier explanation of these goals was clear to coding agents and useless to
+humans. Orientation content was missing, not wrong.
+
+**Why it went in these two files:** `README.md` does not exist yet (it is an M0 deliverable), so there was
+nowhere human-facing in the repository. Both files were marked 🔒 in `AGENTS.md`, so this went through the
+`Plan.md` §6 amendment procedure rather than a quiet edit.
+
+**What it contains:** the product in one sentence; why indexing is built first (the perishable model
+window); the seven stages in plain language with what each one produces; the three-layer data flow; the
+non-goals; the scorecard in plain terms; what is already known to be hard; and the honest bottom line.
+
+**What it deliberately does NOT do:**
+
+- No normative content. Both sections state that `PROMPT.md` is the specification and `Plan.md` §2 is the
+  binding milestone list, and that §2 wins on any conflict.
+- No new requirement, threshold, metric, milestone, or acceptance criterion.
+- No claim of clinical validation, no accuracy figure, and no statement that the system diagnoses
+  anything. The §4 non-goals and the §18 limitations are reproduced in plain language rather than softened.
+- No renumbering, so existing cross-references (§4.2, §5, §6, §7) remain valid.
+
+**Validation:** none run, and none is possible — `make validate` does not exist until M0 builds the
+Makefile. Nothing in this change is executable, and no code, test, threshold, or data file was touched, so
+there is nothing for a gate to break. Recorded here rather than claimed as a passing check.
+
+**Supersedes for humans:** `README.md` (M0) becomes the canonical public entry point and will carry the same
+plain-language framing, without overstating anything.
+
+---
+
+## 2026-10-09 — System 1 (Laya) hosted locally via `laya-serve`; the hosted API is rejected on evidence
+
+**Change:** §19.1 is answered in practice. Laya runs as a **local HTTP service** on
+`http://127.0.0.1:8000`, served by the official `laya-serve` (`pip install "laya[serve]"`), exposing
+`POST /v1/systemone`. It is no longer called as a third-party API.
+
+**Cause:** the hosted System-1 endpoint was measured and rejected; the user then directed local hosting
+so the checkpoint is downloaded once and loaded once.
+
+**Measured evidence (not assumption):**
+
+| | hosted `d1:free` | local `laya` |
+|---|---|---|
+| latency | 384–526 ms (median 432) | 2183–2627 ms (median 2301) |
+| identical calls byte-identical | **no** (0.99478 vs 0.99509) | **yes**, 6/6 runs |
+| rate limiting | HTTP 429 on the 3rd rapid call | none observed |
+| §7.1 budget ≤150 ms | exceeded | exceeded, ~15× |
+
+Determinism is the decisive column: `PROMPT.md` §7.2.1 and §16.3 require byte-identical repeat runs,
+which the remote endpoint does not provide and the local one does.
+
+**Dead end — do not retry.** Ollama's `laya` package is an **MLX build and Apple-Silicon only**:
+`ollama pull laya` fails with *"this model requires MLX support"*. Also `ollama.com/download/ollama-linux-amd64.tgz`
+is a 404; the archive is now `.tar.zst` (1.44 GB, needs `tar --zstd`). Artifacts removed, 3.5 GB reclaimed.
+
+**New dependencies — explicitly approved by the user on 2026-10-09:** `torch 2.14.1+cpu` (CPU-only
+index; this host has no GPU, per §7.4 "no GPU required") and `laya[serve]`. Both live in
+`~/venvs/laya-server`, outside the repository and outside the harness test process, preserving D2's
+rationale (the 421M checkpoint never enters a test process).
+
+**What is NOT changed.** §7.4 "Laya runs on a server and is accessed over HTTP" still holds — we run that
+server ourselves. Tests still read recorded fixtures only (D3). `make validate` never touches this
+endpoint. Live checks stay a separate manual target (§4.4).
+
+**Server configuration and why:** `LAYA_MODELS=english LAYA_MAX_LOADED=1` keeps exactly one 421M
+checkpoint resident (2.0 GB RSS). The default `MAX_LOADED=2` holds english + multilingual ≈ 3 GB and
+would OOM on a 7.8 GB host with no swap. `LAYA_HOST=127.0.0.1` overrides the 0.0.0.0 default.
+
+**Measurements to carry forward (findings, not defects):**
+
+1. **Latency: median 2301 ms against a ≤150 ms budget.** Reported plainly at M12. §7.1 is **not**
+   relaxed to make this green. Contributing factor is 2 CPU cores with no GPU.
+2. **`choice` questions with ≥11 options return uncalibrated confidence** — the `choice:11+` temperature
+   in `rl_agent_config.json` is 0.1006, outside the valid [0.5, 5] range, so the runtime clamps it to
+   0.5 and warns. `PROMPT.md` §8.3 has exactly 10 body systems, so it lands in the safe `choice:6-10`
+   bucket. Adding an 11th option silently changes calibration.
+3. **`noul` can follow its option labels instead of the state** (upstream issue #156): the English
+   checkpoint returns a confident *wrong "no"* on positive input. All eight red flags in §8.2 are
+   `noul`, and §15.2 requires 100% red-flag recall as a release blocker. This must be measured early,
+   not discovered at M11. Documented workaround: ask the same question as a two-option `choice` with
+   neutral keys.
+4. **`act.act_probability` carries no usable signal** (upstream issue #185, reads ~1.0, AUROC 0.30).
+   Gate on `confidence` instead.
+5. **512-token context, ~320 tokens for state** (English checkpoint). Longer states truncate; the
+   response reports `truncated` and `truncated_questions`. Relevant later to `summarize_report`.
+
+**Open question raised for M4 — deliberately not decided here.** §9 escalates when "acuity expected
+level ≥ urgent (ordinal index ≥ 2)". Laya returns a *continuous* expected score — 1.79 with
+P(urgent) = 0.79 on the test presentation — so floor, round, and argmax each give a different answer
+about whether that branch fires. Settled at M4 with a test on both sides of the boundary, not guessed now.
+
+---
+
 ## 2026-10-08 — Milestone reorder: index before the safety core
 
 **Change:** `Plan.md` §2 milestone ordering. Original `M0 → M1 → M2 → M3 → M4 → M5 → M6` becomes `M0 → M1 → M6a–M6c → M4 → M5 → M6d → M7 …`.

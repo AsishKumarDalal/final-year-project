@@ -14,6 +14,42 @@ If two disagree, the higher one wins and the lower one gets fixed — never the 
 
 ---
 
+## 0. What we are building, in plain language
+
+*For anyone reading this repo for the first time. The full narrative is `Plan.md` → "Goals in plain
+language". This section is orientation; it does not define the work.*
+
+**The product.** Read a short description of a patient. Work out how urgent it is and whether it contains
+warning signs of danger. If it does, stop and say *"get a human now"* — decided by fixed rules, with the
+AI deliberately kept out of that step. If it does not, write a plain-language explanation that cites real
+source documents. Never name a disease. Never recommend treatment.
+
+**The build order, and why it looks odd.** We have AI model access for **2–3 days**, and only one stage
+uses it: indexing the document library into something searchable. Everything else is free to build later.
+So: **index the library first → then the safety core → then wire it all together.**
+
+| Order | Stage | Plain language |
+|---|---|---|
+| 1 | Foundation | The empty house plus the guards that stop unsafe code |
+| 2 | Knowledge library | Documents become searchable, with every answer traceable to a passage ⏳ *uses the models* |
+| 3 | Safety core | The no-AI rule engine that decides *"needs a human now"*, plus lookup tables |
+| 4 | Teaching it to answer | Searching, citing, and refusing |
+| 5 | Assembly | One entry point, permissions, HTTP service, scorecard |
+| 6 | Honest report | Publish real numbers, **including the bad ones** |
+| 7 | Teaching the model | Fine-tune, then publish before/after |
+
+**Three sentences worth memorising:**
+
+1. **The model decides. The rules escalate. The AI explains. The tools hold the truth.** If AI output
+   could change a safety outcome, the design is broken.
+2. **Fix the code, never the test, never the threshold, never the target.** A failing number is a result
+   to report, not a setting to adjust until it looks green.
+3. **Build only what this milestone's list says.** Anything else is a note for `docs/TODO.md`, not a change.
+
+---
+
+---
+
 ## 1. Before you start anything
 
 1. Read `PROMPT.md` in full. Then `Plan.md` in full. Then this file.
