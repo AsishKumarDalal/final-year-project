@@ -16,6 +16,74 @@ Durable learnings for this repo: things a future agent would need again and coul
 - Skip session narration, task progress, and anything git already records. Progress belongs in `Plan.md` §2; rationale in `PROMPT.md` and `Plan.md` §7; commands in `docs/runbook.md`; deferred work in `current_tasks.md`.
 - **Never put secrets, keys, or patient data in this file.**
 
+### 2026-10-09 — Live Laya answered differently than the fixtures did (2 adapter bugs)
+
+- **Live laya-serve returns NUMERIC answers; fixtures return STRING/`probabilities`.**
+  Verified against the local `laya-serve` (`english`, rev `7b928d82`):
+  - `noul` → `{"type":"noul","noul":0.9306,"confidence":0.9306}` — **no
+    `probabilities` dict**. The old parser read only
+    `probabilities["true"]`/string `"true"`, so **every live red flag parsed
+    0.0 → red-flag recall 0% live**. Live polarity confirmed: true text →
+    0.9306, false text → 0.1113 (so numeric `noul` tracks P(true) directly).
+  - `score` → `probabilities` keyed **numerically** `{"0":0.3645,…}` with a
+    separate `legend: {"0":"routine",…}`. Unmapped, the distribution came out
+    uniform 0.25 → `P(resuscitation)=0.25` always breached the 0.10 threshold →
+    **every live query escalated, including "I have a cold"**.
+  - `noul` renders option labels `false:`/`true:` and can answer "no" to a
+    positive state (upstream #156) — measure this against the flags, it may be
+    the label bug or genuine model misreading.
+- **Then the real trap — argmax.** Even with the legend parsed, `parse_verdict`
+  took argmax of the distribution as the expected acuity. Laya genuinely scores
+  a cold `{routine .12, soon .37, urgent .50, resus .009}` → argmax `urgent` →
+  escalate. **PROMPT.md §8.1 line 189 already answers this: escalate on the
+  distribution, not the point estimate alone.** Expected level now derives from
+  the distribution when top mass < 0.5 (cold → E=1.40 `soon`; chest pain top
+  .75 → `urgent`; unresponsive .91 → `resuscitation`). No threshold changed.
+- **Never trust an adapter that has only ever run against fixtures.** Everything
+  looked green (75 tests) while the live path was structurally blind. A live
+  probe is part of proving a parser, not an optional extra.
+- **Measured live latency:** single question warm ~0.5 s, but the **full
+  12-question set ~12.4 s** vs the §7.1 ≤150 ms budget (~80× over; 1.7 s/question
+  residual from the earlier measure, plus this box's CPU). Acuity `confidence`
+  on simple text is ~0.20–0.27 → `abstained=True` is normal; abstain must gate on
+  the *salient* keys only (already fixed earlier via the memory.md note).
+- **On Laya onset order for this box:** `pip install "laya[serve]"`
+  (laya-0.4.1) into system python, then
+  `setsid nohup env LAYA_HOST=127.0.0.1 LAYA_PORT=8000 LAYA_DEVICE=cpu LAYA_MODELS=english LAYA_PRELOAD=1 LAYA_MAX_LOADED=1 LAYA_THREADS=4 USE_TF=0 laya-serve > /tmp/laya.log 2>&1 < /dev/null & disown`,
+  `/health` reports `"status":"ok","loaded":["english"],"revisions":{"english":"7b928d82…"}` in ~40 s. Start it **detached** — a restart inside the same command call gets SIGTERM'd.
+- **`pkill -f "run_e2e"` / `pkill -f "laya-serve"` kills YOUR OWN shell** — the pattern matches the wrapping `bash -c` process. Use `pgrep -af "[r]un_e2e"` (leading bracket) to look, then kill by PID.
+- **MiniLM reloads its weights every fresh process** (~4 s from local cache, not a download) and prints a `Loading weights` bar. `HF_HUB_DISABLE_PROGRESS_BARS=1` silences it (set in `dev/run_e2e.py`).
+
+### 2026-10-09 — Dev retrieval now runs on FAISS with a checkpoint-style runner
+
+- **`dev/faiss_store.py`** — `FaissVectorStore`, same method names as
+  `graphrag.stores.MemoryVectorStore` (`ensure_collections/upsert/search/count`)
+  plus `save/load`. `faiss.IndexFlatIP` over L2-normalised float32 vectors
+  (= cosine); payloads in a dict sidecar; `payload_filter` falls back to
+  brute-force. **`faiss` is a dev-only dependency — requirement needs approval.**
+- **`dev/run_e2e.py` is now a two-command flow.**
+  - `--index --corpus-dir <dir>` → chunk → hosted-Qwen extraction
+    (`--batch 1`, batching drops JSON) → graphrag `Graph` **plus a networkx
+    `GraphStore`** for the harness → communities → reports → MiniLM → FAISS,
+    checkpointed under `dev/data/` (`chunks.json`, `graph.json`,
+    `networkx.json`, `communities.json`, `community_reports.json`, `faiss/`,
+    `triples.jsonl`, `meta.json`). Resumable; `--skip-reports`; `--limit N`.
+  - `--ask "question"` → loads the checkpoint and runs the **full**
+    `medharness` system (`Orchestrator.assess`, Laya-or-fixtures, Qwen,
+    `GraphRAGExternalSearch`) with `community_reports` wired in so global search
+    works. **No harness logic lives in dev/ — only wiring.**
+- **Measured:** fresh 1-doc/1-chunk index = **51 s wall** (~40 s the single
+  extraction call). 15 chunks ≈ 11–12 min + reports. `data/corpus_test/aspirin.txt`
+  is 55 KB → 15 chunks; slice small corpora with
+  `text[:int(len*0.35)].rsplit("\n\n",1)[0]` (5 chunks) or `[:3500]` (1 chunk).
+- **Extraction prompt quirk on this server:** it's a llama.cpp build with no
+  native tool support, so the harness never sends OpenAI `tools=` (the Qwen
+  client turns `tools` XML in the system prompt into `<tool_call>` text instead);
+  and on the graphrag side batched extraction drops JSON — use `--batch 1`.
+- **`dev/build_fast_engine.py` is now legacy** (still loads `data/graph.json`
+  into `MemoryVectorStore` + in-memory graph); new runs use the checkpoint flow.
+- **The tunnel URL rotates** — it is `https://pond-breathing-foto-advocate.trycloudflare.com/v1` as of this session; override with `KAGGLE_LLM_BASE_URL`. TLS kill by Cloudflare earlier means any restart flushes the URL.
+
 ### 2026-10-09 — Local CPU LLM: Ollama + qwen2.5:1.5b (harness now runs offline)
 
 - **Model:** `qwen2.5:1.5b` Q4_K_M, 986 MB, ctx 32k, `capabilities: [completion, tools]`.

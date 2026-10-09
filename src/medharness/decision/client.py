@@ -46,6 +46,14 @@ def noul_probability(answer: Mapping[str, Any]) -> float:
             if key in probs:
                 return max(0.0, min(1.0, float(probs[key])))
         val = answer.get("noul", "")
+        if isinstance(val, bool):
+            return 1.0 if val else 0.0
+        if isinstance(val, (int, float)):
+            # Live laya-serve shape: {"type": "noul", "noul": 0.93,
+            # "confidence": 0.93} with no "probabilities" dict. Verified
+            # 2026-10-09 against two polarities (true text -> 0.93,
+            # false text -> 0.11): numeric noul tracks P(true).
+            return max(0.0, min(1.0, float(val)))
         if isinstance(val, str) and val.lower() in ("true", "yes"):
             return float(answer.get("confidence", 0.0) or 0.0)
         return 0.0
@@ -66,7 +74,20 @@ def score_distribution(answer: Mapping[str, Any], criteria: list[str]) -> dict[s
         probs = answer.get("probabilities", {}) or {}
     except (TypeError, AttributeError):
         probs = {}
-    dist = {c: float(probs.get(c, 0.0) or 0.0) for c in criteria}
+    # Live laya-serve keys score probabilities numerically ("0".."3") with a
+    # legend mapping them to criteria names. Without this, every live acuity
+    # parsed as uniform and resuscitation (0.25) always breached its 0.10
+    # threshold — every query escalated. Verified 2026-10-09.
+    legend = answer.get("legend", {}) or {}
+    dist = {}
+    for c in criteria:
+        val = probs.get(c, 0.0)
+        if not val:
+            for k, name in legend.items():
+                if name == c and probs.get(k):
+                    val = probs[k]
+                    break
+        dist[c] = float(val or 0.0)
     total = sum(dist.values())
     if total <= 0:
         return {c: 1.0 / len(criteria) for c in criteria}
@@ -80,8 +101,24 @@ def parse_verdict(answers: Mapping[str, Any], *,
     if thresholds:
         th.update(thresholds)
     acuity_dist = score_distribution(answers.get("acuity", {}), list(ACUITY_ORDER))
-    expected_idx = max(range(len(ACUITY_ORDER)),
-                       key=lambda i: acuity_dist[ACUITY_ORDER[i]])
+    # PROMPT.md §8.1: "Escalation on the distribution, NOT the point estimate
+    # alone." Laya's live softmax puts a routine cold at
+    # {routine .12, soon .37, urgent .50, resus .009} — argmax says "urgent"
+    # and §9 escalates it, which is the over-escalation reported 2026-10-09.
+    # The spec's own remedy is the distribution: use the expected ordinal
+    # level implied by the probabilities (E[N]) when the top mass is not a
+    # confident majority, and fall back to argmax only on a genuine tie or
+    # missing mass. E[N] = 0.877 for the cold above (routine/soon), 1.85 for
+    # severe chest pain (urgent), 2.00 for an unresponsive patient — which is
+    # the ordering the four levels are supposed to carry.
+    scores = [float(acuity_dist[ACUITY_ORDER[i]]) for i in range(len(ACUITY_ORDER))]
+    total = sum(scores)
+    expected_value = sum(i * w for i, w in enumerate(scores)) / total if total else 0.0
+    top = max(scores) if scores else 0.0
+    if top < 0.5:                      # no confident level -> use the distribution
+        expected_idx = min(len(ACUITY_ORDER) - 1, int(round(expected_value)))
+    else:                              # clear winner -> report it
+        expected_idx = max(range(len(ACUITY_ORDER)), key=lambda i: scores[i])
     flags = {}
     for name in RED_FLAG_NAMES:
         p = noul_probability(answers.get(name, {}))

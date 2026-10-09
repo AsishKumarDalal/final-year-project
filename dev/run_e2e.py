@@ -29,6 +29,12 @@ sys.path.insert(0, str(_ROOT))          # so `import graphrag` resolves
 sys.path.insert(0, str(_ROOT / "src"))
 sys.path.insert(0, str(_ROOT / "dev"))
 
+import os as _os
+
+# MiniLM weights are cached locally; this only silences the per-process
+# "Loading weights" bar (the ~4s load itself stays — one process = one load).
+_os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+
 DEFAULT_EXTRACTION_BASE_URL = os.getenv(
     "KAGGLE_LLM_BASE_URL",
     "https://pond-breathing-foto-advocate.trycloudflare.com/v1")
@@ -178,6 +184,13 @@ def do_index(args) -> int:
     displays = {k: n.display for k, n in graph.nodes.items()}
     reports: list[CommunityReport] = []
     for community in sorted(communities, key=lambda c: (c.level, c.id)):
+        if args.skip_reports:
+            reports.append(CommunityReport(
+                community_id=community.id, level=community.level,
+                title=community.title, summary="",
+                member_text_units=member_text_units(community, edge_dicts),
+                model_id=""))
+            continue
         lines = member_fact_lines(community, edge_dicts, displays)
         subs = [r for r in reports if r.level == community.level - 1]
         context = build_report_context(community, member_lines=lines,
@@ -353,6 +366,8 @@ def main(argv=None) -> int:
     parser.add_argument("--extraction-base-url", default=DEFAULT_EXTRACTION_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_EXTRACTION_MODEL)
     parser.add_argument("--timeout-s", type=int, default=600)
+    parser.add_argument("--skip-reports", action="store_true",
+                        help="skip LLM report narration (stays fast; global search degrades)")
     args = parser.parse_args(argv)
     if args.index:
         return do_index(args)

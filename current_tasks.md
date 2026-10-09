@@ -1,17 +1,36 @@
 # current_tasks.md — Track A medical harness build (simple stores, dev speed)
 
-**Updated:** 2026-10-09 · **Status:** Track A built S0–S10, 52 tests green, `make arch` passes.
-Run `python3 -m medharness.demo` (fixtures, offline). Live: `MEDH_LIVE=1` (Laya :8000),
-`MEDH_ENABLE_LLM=1` (hosted Qwen). The old coding-agent `harness/` (Track H) was
-deprecated → `deprecated/harness/` (verified zero code dependency).
-**User order:** fast + simple. Vector = in-memory numpy cosine (no Qdrant).
-Graph = networkx in-process (no Neo4j). Embeddings = local MiniLM (already
-installed). Decisions = Laya (System-1). Generation = hosted Kaggle Qwen
+**Updated:** 2026-10-09 · **Status:** Track A S0–S11, 75 tests green, `make arch` passes;
+**first LIVE Laya run done** (2 adapter bugs found + fixed), dev retrieval now FAISS.
+Run `python3 -m medharness.demo` (fixtures, offline). Live: `MEDH_LIVE=1` (Laya :8000 —
+it IS up, `decisions : laya @ … (available=True)`), `MEDH_ENABLE_LLM=1` (hosted Qwen).
+Dev retrieval: `python3 dev/run_e2e.py --index --corpus-dir data/corpus_micro` then
+`--ask "..."` (FAISS + networkx checkpoint in `dev/data/`). The old coding-agent
+`harness/` (Track H) was deprecated → `deprecated/harness/` (zero code dependency).
+**User order:** fast + simple. Vector = **FAISS** (dev) / Qdrant (prod), graph =
+networkx (dev) / Neo4j (prod). Embeddings = local MiniLM. Decisions = Laya
+(System-1, local `laya-serve`). Generation = hosted Kaggle Qwen
 (`docs/hosting_qwen_kaggle.md`, client-side `<tool_call>` pattern — NO `tools=`
 param, server ignores it).
 **Amendment note:** `PROMPT.md` §7.4 says Qdrant+Neo4j in Docker; this build uses
-simple stores for dev speed. Drop-in adapters with the same interface stay the
-goal; record the swap in `docs/decisions.md` at S1.
+FAISS + networkx for dev speed, with Qdrant/Neo4j as the production target.
+Recorded in `docs/decisions.md` 2026-10-09.
+
+## Right now
+
+- 🔴 **OPEN for M11+ / baseline:** live Laya **over-elicitates red flags** — chest-pain
+  text fires dyspnea (0.71) and severe abdominal pain (0.78) as well as chest pain
+  (0.93). Recall is good, precision is poor. Measure on `evals/red_flags` before any
+  threshold change; never tune on `holdout`. Expected §14.3 finding (no medical training).
+- 🔴 **OPEN, baseline measurement:** full 12-question set latency ~12.4 s vs the §7.1
+  ≤150 ms budget (~80×). Single question warm ~0.5 s. Report p95 at M12; do not "fix"
+  by dropping questions (protocol is fixed and versioned, §8.2).
+- 🔴 **Live acuity confidence is low** (~0.20–0.27 on simple text) → `abstained=True`
+  is common on the live path. Abstain must gate on salient keys only (already true);
+  watch that §9's abstain+flag≥0.40 branch never fires spuriously.
+- **Next:** record live fixtures for the 20 synthetic cases (M2 deliverable), then
+  M11 eval sets (`evals/sets/{scenarios,red_flags,refusals,holdout}.jsonl`) and the
+  M12 baseline report — including the bad numbers above.
 
 ## Build order (S = step, each = code + test + tick below)
 
@@ -45,6 +64,14 @@ goal; record the swap in `docs/decisions.md` at S1.
       → docs return as `text_unit:` facts → LLM answers grounded. `GlobalSearchClient`
       degrades to a named refusal offline. Verified: scripted kb→external→answer cites
       `text_unit:chest_pain::0`. 46 tests green.
+- [x] **S10 handoff** — `receipt.py` (reproducible fingerprint) + `handoff.py`
+      (clinician handoff + intake JSON, disclaimer verbatim) + `security_demo.py`.
+- [x] **S11 live Laya** — `laya-serve` up on `:8000`; `decision/client.py` fixed to
+      parse the **live** wire shape (`noul` numeric, `score` numeric keys + `legend`)
+      and to derive the expected acuity from the **distribution**, not the argmax
+      (§8.1 line 189). `tests/test_decision_client.py` new. 75 tests green.
+- [x] **S12 FAISS dev retrieval** — `dev/faiss_store.py` + checkpoint-style
+      `dev/run_e2e.py --index|--ask` (FAISS + networkx + communities in `dev/data/`).
 
 ## Now / next / later — archive (pre-Track-A state, kept for record)
 

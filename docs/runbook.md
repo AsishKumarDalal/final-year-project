@@ -91,6 +91,15 @@ median latency ~2301 ms vs the §7.1 ≤150 ms budget (~15× over — 2 CPUs, no
 100% red-flag-recall blocker, measure early); gate on `confidence`, never on
 `act.act_probability` (~1.0 always).
 
+**Measured 2026-10-09 on this box (single-question warm ~0.5 s):** live
+`noul`/`choice` answers come back as **numeric** values with no `probabilities`
+dict (`{"noul": 0.93}` / `{"probabilities": {"cardiac": 0.97}}`), and `score`
+answers use **numeric keys + a `legend`** (`{"0": 0.12, …}` +
+`{"0": "routine", …}`). Any parser must read those shapes — the fixture shape
+(`{"noul": "true", "probabilities": {"true": …}}`) will never see them, and
+treating live answers as fixtures silently zeroed every red flag. See
+`docs/decisions.md` (two live-adapter bugs, same day).
+
 ## 3. Qdrant + Neo4j in Docker (downloaded, dev-only)
 
 Images: `qdrant/qdrant:latest` + `neo4j:5-community`, declared in
@@ -199,8 +208,33 @@ To test the whole harness against the real corpus without Qdrant/Neo4j, use the
 differ from production — same hosted Qwen, same Laya, same `QueryEngine`.
 
 > **Live tunnel (verified working):** `https://pond-breathing-foto-advocate.trycloudflare.com/v1`,
-> model `qwen2.5-32b-instruct`, key `sk-local`. Laya is NOT up on `:8000` in this
-> box, so the runner falls back to recorded fixtures for decisions (see below).
+> model `qwen2.5-32b-instruct`, key `sk-local`. **Laya IS up on `:8000` in this
+> box** (`laya-serve`, `english` checkpoint rev `7b928d82`) — the runner reports
+> `decisions : laya @ http://127.0.0.1:8000 (available=True) -> Laya`. Two live
+> adapter bugs were found and fixed by that first live run (`noul` numeric
+> shape, `score` numeric keys + argmax); see `docs/decisions.md` — do not re-derive.
+
+**Preferred path (checkpoint flow, FAISS):**
+
+```bash
+# 1) Index a corpus ONCE into dev/data/ (FAISS + networkx + communities + reports)
+python3 dev/run_e2e.py --index --corpus-dir data/corpus_micro --limit 1
+python3 dev/run_e2e.py --index --corpus-dir data/corpus_test --limit 1   # aspir: 15 chunks
+
+# 2) Ask the harness (full medharness flow, not a stub)
+python3 dev/run_e2e.py --ask "i have a cold, what should I watch for?" --role patient
+python3 dev/run_e2e.py --ask "Severe chest pain spreading to my left arm." --role patient
+python3 dev/run_e2e.py --ask        # safe + escalate demo pair
+
+MEDH_LIVE=1 python3 dev/run_e2e.py --ask "..."   # force Laya at :8000 (fails if down)
+```
+
+`--index` flags: `--corpus-dir`, `--limit N`, `--batch 1` (**keep 1** — the
+tunnel drops JSON on batches), `--max-triples 10`, `--skip-reports` (fast), and
+`--checkpoint-dir dev/data` (default). Env: extraction defaults to
+`KAGGLE_LLM_BASE_URL` / `KAGGLE_LLM_MODEL`.
+
+**Legacy path (graph.json only):**
 
 ```bash
 # 1) Build the graph with the REAL pipeline, but skip the Qdrant/Neo4j writes.
@@ -223,10 +257,15 @@ MEDH_LIVE=1 python3 dev/run_e2e.py                # force Laya at :8000 (fails i
 `graphrag.stores.MemoryVectorStore` (fast vector) + the in-memory
 `graphrag.graph.Graph` (fast graph), wired to real Laya routing + hosted-Qwen
 generation, and drives `medharness`. Production uses Qdrant + Neo4j instead
-(sect 3) — the graph and engine are identical.
+(sect 3) — the graph and engine are identical. **Superseded by the checkpoint
+flow above**, which uses FAISS + networkx and also indexes communities.
 
-**Measured:** extraction over the tunnel is ~1 chunk / 30 s (Qwen round-trip +
-Cloudflare). `data/corpus_min/myocardial_infarction.txt` (47 KB) chunks to ~19.
-`dev/run_e2e.py` then runs L1→L2→L3 on a safe question and the escalated path
-in ~15–20 s per Qwen call. `dev/` is **not** part of `make validate`.
+**Measured:** extraction over the tunnel is ~1 chunk / 30–60 s (Qwen round-trip +
+Cloudflare). The checkpoint flow was timed fresh on 1 doc / 1 chunk:
+**51 s wall**, of which ~40 s is the single extraction call — embedding, graph,
+networkx, communities and FAISS are seconds. 15 chunks ≈ 11–12 min. `--ask`
+then runs L1→L2→L3 in ~15–20 s per Qwen call. `dev/` is **not** part of
+`make validate`. Observed on `--ask`: MiniLM prints a `Loading weights` bar on
+every fresh process (~4 s load from local cache — not a download); silenced via
+`HF_HUB_DISABLE_PROGRESS_BARS=1`, already set in the runner.
 

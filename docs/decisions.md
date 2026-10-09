@@ -8,6 +8,78 @@ For amendment procedure see `Plan.md` §6. For settled design decisions made up 
 
 ## 2026-10-09 — running log (small decisions, kept with the amendments)
 
+- **Laya live locally for the first time; two live-adapter bugs found and fixed**
+  (2026-10-09, user-ordered "make up laya"). `pip install "laya[serve]"`
+  (laya-0.4.1) + `laya-serve` on `:8000`, `english` checkpoint rev `7b928d82`,
+  CPU. **First live run exposed that the live path was silently blind** — the
+  harness had only ever been exercised against fixtures:
+  - **Bug 1 — `noul` numeric shape.** live laya-serve returns
+    `{"type":"noul","noul":0.9306,"confidence":0.9306}` with **no
+    `probabilities` dict**, while fixtures use `{"noul":"true",
+    "probabilities":{"true":0.94,...}}`. `noul_probability()` only read the
+    fixture shape, so **every live red flag parsed to 0.0 and red-flag recall was
+    0% on the live path** — the §15.2 release blocker would have failed live.
+    Fixed in `decision/client.py`; polarity verified live (true text → 0.9306,
+    false text → 0.1113). This is memory.md's upstream issue #156 manifesting as
+    a *parsing* bug, not only the label bug already noted.
+  - **Bug 2 — `score` distribution numeric keys + argmax.** live `score`
+    answers key probabilities numerically (`{"0":0.12,"1":0.37,"2":0.50,"3":0.009}`)
+    and supply a `legend`. Nothing read the legend, so a real distribution
+    parsed as **uniform 0.25 each**, which always breached §9's
+    `P(resuscitation) ≥ 0.10` — **every live query escalated**. Fixed the
+    legend mapping (`score_distribution`), then found the *second-order* cause:
+    even with the legend, `parse_verdict` took the **argmax** of the distribution
+    as the expected level, which contradicts **PROMPT.md §8.1 line 189 — escalate
+    on the distribution, "not the point estimate alone"**. Laya genuinely scores
+    a routine cold `{routine .12, soon .37, urgent .50, resus .009}`; argmax says
+    `urgent` → escalate. The expected ordinal level is now derived from the
+    distribution (E[level]) whenever top mass < 0.5, which restores the ordering
+    the four levels are meant to carry: cold → E=1.40 → `soon`; severe chest pain
+    → top mass .75 → `urgent`; unresponsive → top mass .91 → `resuscitation`.
+    No threshold was changed. Regression tests: `tests/test_decision_client.py`
+    (new, 6 cases) — fixture shape, live shape, malformed, legend resolution,
+    argmax→distribution, and a genuine emergency still escalating.
+  - Result: cold → `decision=explain` (LLM reached); chest pain →
+    `decision=escalate`, `llm_called=false`. 75 tests green, `make arch` green.
+    Baseline material (carry to M12, do not tune against): live single-question
+    latency ~0.5 s warm but the **full 12-question set is ~12.4 s vs the §7.1
+    ≤150 ms budget (~80×)**; live acuity `confidence` on simple text is
+    ~0.20–0.27, so `abstained=True` is common; Laya over-elicitates flags
+    (chest-pain text also fired dyspnea 0.71, abdominal pain 0.78) — recall good,
+    precision poor, exactly §14.3's expectation for an untrained checkpoint.
+- **Dev retrieval moved from MemoryVectorStore to FAISS + a checkpoint-style
+  runner** (2026-10-09, user-ordered). `dev/faiss_store.py` — `FaissVectorStore`
+  with the same method names as `graphrag.stores.MemoryVectorStore`
+  (`ensure_collections/upsert/search/count`, plus `save/load` for
+  checkpoints), `faiss.IndexFlatIP` over L2-normalised vectors (= cosine), JSON
+  payload sidecar, and a brute-force path when `payload_filter` is set (small
+  dev corpus — correctness beats sharding). `faiss` is imported lazily and is a
+  **dev-only** dependency — `pyproject.toml` untouched. `dev/run_e2e.py` is now a
+  two-command checkpoint flow:
+  - `python3 dev/run_e2e.py --index --corpus-dir data/corpus_micro` — chunk →
+    extract via the hosted-Qwen tunnel (`qwen2.5-32b-instruct`,
+    `https://pond-breathing-foto-advocate.trycloudflare.com/v1`, `--batch 1`
+    because batching drops JSON) → build the graphrag `Graph` **and** a networkx
+    `GraphStore` for the harness → partition communities → narrate reports →
+    embed with MiniLM → write FAISS + `communities.json` +
+    `community_reports.json`, all into `dev/data/` (`chunks.json`, `graph.json`,
+    `networkx.json`, `communities.json`, `community_reports.json`, `faiss/`,
+    `triples.jsonl`, `meta.json`). Resumable (`triples.jsonl` + content-hash
+    `cache/`), `--skip-reports` to stay fast, `--limit N` for a small dry run.
+  - `python3 dev/run_e2e.py --ask "question"` — loads the checkpoint and runs the
+    full `medharness` system unchanged (`Orchestrator.assess`, Laya-or-fixtures,
+    hosted Qwen, `GraphRAGExternalSearch`). Community reports are fed to
+    `QueryEngine.community_reports`, so global search is available.
+  - **No harness logic is reimplemented in `dev/`** — only wiring.
+  - **Measured:** fresh 1-doc/1-chunk index = **51 s wall** (~40 s of it the
+    single extraction call). 1-doc/15-chunk ≈ 11–12 min + reports. `--ask` prints
+    a checkpoint summary (`chunks=… nodes=… units=…`). The `Loading weights …`
+    MiniLM bar on every process is silenced with
+    `HF_HUB_DISABLE_PROGRESS_BARS=1` (set in the runner; the ~4 s model load
+    itself is per-process and unavoidable without a long-lived service).
+  - `dev/build_fast_engine.py` is now **legacy** (still works, kept for
+    reference); new runs use the checkpoint flow.
+
 - **Dev/test uses fast local stores; production uses Qdrant + Neo4j** (2026-10-09,
   user-ordered). For iterating and end-to-end testing without Docker, the harness
   reads the SAME graph the real pipeline builds but held in-process:
