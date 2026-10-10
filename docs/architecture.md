@@ -5,7 +5,7 @@
 | Track | What | Lives in | Spec |
 |---|---|---|---|
 | A | Medical decision-support harness (**the product**) | `src/medharness/` | `PROMPT.md`, `Plan.md` M0–M12 |
-| B | GraphRAG indexer (knowledge-graph builder) | `graphrag/` | `docs/rag_docs/`, `graphrag_plan.md` |
+| B | GraphRAG indexer (knowledge-graph builder) | `graphrag/` | `docs/rag_docs/`, `docs/graphrag_plan.md` |
 
 Rules: A never imports B's code; B never imports A. The **one interface** is data:
 B writes the Qdrant+Neo4j index offline; A's `search_external_docs` reads it

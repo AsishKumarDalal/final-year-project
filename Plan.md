@@ -204,7 +204,7 @@ independent deliverables**, and they must not be tangled together.
 |---|---|---|
 | What | the medical decision-support harness | **the GraphRAG indexer** |
 | Lives in | `src/harness/`, `Plan.md` §2 below | **`graphrag/`** |
-| Milestones | M0–M15, unchanged | its own plan: **`graphrag_plan.md`** |
+| Milestones | M0–M15, unchanged | its own plan: **`docs/graphrag_plan.md`** |
 | Spec | `PROMPT.md` | `docs/rag_docs/` (the design record) |
 | Produces | a JSON/HTTP service | a graph + vector index |
 
@@ -230,7 +230,7 @@ two are kept side by side and the boundary is written down:
 1. Unit suite (no network, no key) → 2. extraction adapter → 3. merge funnel →
 4. stores + local MiniLM → 5. **Wikipedia medical test corpus** indexed locally →
 6. query layer → 7. **main corpus** via the GitHub Actions batch job, checkpointed
-to HuggingFace every 1–1.5 h (`graphrag_plan.md` §4).
+to HuggingFace every 1–1.5 h (`docs/graphrag_plan.md` §4).
 
 Current status and what is blocked: **`current_tasks.md`**.
 

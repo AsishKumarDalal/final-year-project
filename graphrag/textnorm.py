@@ -29,7 +29,7 @@ from typing import Iterable
 # The rag_docs design record uses a business-entity taxonomy. Our domain is
 # clinical, so the list below is the medical one from
 # docs/rag_implementationplan.md §2. It is NOT yet domain-reviewed; that is an
-# open question recorded in graphrag_plan.md §7.
+# open question recorded in docs/graphrag_plan.md §7.
 VALID_ENTITY_TYPES: frozenset[str] = frozenset(
     {
         "symptom",

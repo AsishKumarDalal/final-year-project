@@ -20,7 +20,7 @@ from pathlib import Path
 # Chunking defaults follow PROMPT.md's question of roughly 1200 tokens per text
 # unit with ~100 tokens of overlap. At ~4 characters per token that is 4800/400.
 # The rag_docs design record used 1000 chars for a Wikipedia test corpus; both
-# are legitimate, so this is a setting rather than a constant (graphrag_plan.md).
+# are legitimate, so this is a setting rather than a constant (docs/graphrag_plan.md).
 DEFAULT_CHUNK_TARGET_CHARS = 4800
 DEFAULT_CHUNK_OVERLAP_CHARS = 400
 

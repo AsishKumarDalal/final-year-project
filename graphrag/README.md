@@ -3,7 +3,7 @@
 A standalone knowledge-graph builder. **Not part of the harness.** Nothing in
 `src/harness/` imports this, and this imports nothing from there.
 
-Plan: [`../graphrag_plan.md`](../graphrag_plan.md) · Design record:
+Plan: [`../docs/graphrag_plan.md`](../docs/graphrag_plan.md) · Design record:
 [`../docs/rag_docs/`](../docs/rag_docs/) · Status:
 [`../current_tasks.md`](../current_tasks.md)
 
@@ -78,4 +78,4 @@ All from the environment; `.env` is read if present and real env vars win.
 
 Entity types are the medical set (`symptom`, `condition`, `test`, `drug`,
 `procedure`, `body_system`, `guideline`, `population`) — **not yet
-domain-reviewed**, see `graphrag_plan.md` §7.
+domain-reviewed**, see `docs/graphrag_plan.md` §7.

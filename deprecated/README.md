@@ -15,4 +15,4 @@ It is **not the medical product** and is not maintained. The real product is
 medical decision-support harness.
 
 **Do not build on this. Do not import it.** Kept only so the reuse-vs-replace
-history in `harness_plan.md` §3 stays checkable.
+history in `docs/harness_plan.md` §3 stays checkable.

@@ -154,6 +154,27 @@ via `KAGGLE_LLM_BASE_URL` when the tunnel rotates — URLs change on restart,
 model stays `qwen2.5-32b-instruct` on hosted Kaggle T4 x2). Server has no native
 tool support — the schema lives in the system prompt (Qwen `<tools>` XML) and
 the client parses `<tool_call>` text.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ##FULL CODE 
 """
 Always-on OpenAI-compatible LLM endpoint on Kaggle using llama.cpp
@@ -161,16 +182,19 @@ Always-on OpenAI-compatible LLM endpoint on Kaggle using llama.cpp
 Needs: Internet ON, GPU accelerator. Run via Save Version -> Save & Run All (Commit).
 The script never exits, so the commit keeps running until the 12h limit.
 Tool calls are NOT handled here. The client parses them (see client_tool_loop.py).
+
+Stable watchdog: it only restarts the server when the process has really exited
+or the port has been closed for ~3 minutes. It never kills a server that is just busy.
 """
-import os, re, sys, json, time, subprocess, requests
+import os, re, sys, json, time, socket, subprocess, requests
 
 # ---------- config ----------
 # Needs accelerator "GPU T4 x2" (2 x 15 GB = 30 GB VRAM). A 32B Q4_K_M model (~20 GB) fits with room for context.
 REPO_ID = "bartowski/Qwen2.5-32B-Instruct-GGUF"
 FILENAME = "Qwen2.5-32B-Instruct-Q4_K_M.gguf"
 MODEL_ALIAS = "qwen2.5-32b-instruct"           # name clients pass as `model`
-N_CTX = 8192                                   # lower to 4096 if you hit out-of-memory
-TENSOR_SPLIT = [0.5, 0.5]                      # split layers evenly across both T4s
+N_CTX = 8192                                   # lower to 4096 if the diagnostics show out-of-memory
+TENSOR_SPLIT = [0.5, 0.5]                      # try [0.45, 0.55] if GPU 0 runs out of memory first
 PORT = 8000
 LOCAL = f"http://127.0.0.1:{PORT}"
 OUT = "/kaggle/working" if os.path.isdir("/kaggle/working") else "."
@@ -183,7 +207,6 @@ def sh(cmd):
 
 
 # ---------- 1. install ----------
-# prebuilt CUDA wheel (no 15 min compile). Falls back to default index if the wheel index is unreachable.
 sh(f"{sys.executable} -m pip install -q 'llama-cpp-python[server]' "
    "--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 "
    "--prefer-binary")
@@ -204,19 +227,74 @@ tunnel_proc = None
 public_url = None
 
 
-def server_alive():
+def port_open():
+    """Cheap liveness check. A TCP connect never waits behind a running generation."""
+    try:
+        with socket.create_connection(("127.0.0.1", PORT), timeout=3):
+            return True
+    except OSError:
+        return False
+
+
+def server_ready():
+    """Used only at startup. /v1/models can queue behind a running generation, so never use it as a watchdog."""
     try:
         return requests.get(f"{LOCAL}/v1/models", timeout=5).ok
     except Exception:
         return False
 
 
-def start_server():
+def dump_diag(n=40):
+    """Print why the server died: last log lines + GPU memory."""
+    print("---- last llama_server.log lines ----", flush=True)
+    try:
+        lines = open(f"{OUT}/llama_server.log", errors="ignore").read().splitlines()[-n:]
+        print("\n".join(lines), flush=True)
+    except Exception as e:
+        print("no log:", e, flush=True)
+    print("---- GPU memory (used, total) ----", flush=True)
+    subprocess.run("nvidia-smi --query-gpu=memory.used,memory.total --format=csv,noheader", shell=True)
+    print("---- RAM / disk ----", flush=True)
+    subprocess.run("free -m | head -2; df -h /tmp /kaggle/working 2>/dev/null", shell=True)
+    print("---- processes on GPU ----", flush=True)
+    subprocess.run("nvidia-smi --query-compute-apps=pid,used_memory --format=csv", shell=True)
+    print("-----------------------------------", flush=True)
+
+
+def gpu_used_mb():
+    """Highest memory.used across GPUs, in MiB (None if nvidia-smi fails)."""
+    try:
+        out = subprocess.check_output(
+            "nvidia-smi --query-gpu=memory.used --format=csv,noheader,nounits", shell=True, text=True)
+        return max(int(x) for x in out.split())
+    except Exception:
+        return None
+
+
+def stop_server():
+    """Fully stop the old server and wait until its VRAM is really released before a new one loads."""
     global server_proc
     if server_proc and server_proc.poll() is None:
-        server_proc.kill()
-    subprocess.run(["pkill", "-f", "llama_cpp.server"], check=False)
-    time.sleep(2)
+        server_proc.terminate()
+        try:
+            server_proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            server_proc.kill()
+            server_proc.wait(timeout=30)
+    subprocess.run(["pkill", "-9", "-f", "llama_cpp.server"], check=False)   # catch any stray copy
+    for _ in range(90):                      # wait up to 90s for the driver to free memory
+        used = gpu_used_mb()
+        if used is None or used < 1500:
+            break
+        time.sleep(1)
+    print(time.strftime("%H:%M:%S"), f"VRAM before load: {gpu_used_mb()} MiB max per GPU", flush=True)
+    if (gpu_used_mb() or 0) >= 1500:
+        subprocess.run("nvidia-smi --query-compute-apps=pid,used_memory --format=csv", shell=True)
+
+
+def start_server():
+    global server_proc
+    stop_server()
     cfg = {
         "host": "0.0.0.0",
         "port": PORT,
@@ -239,8 +317,9 @@ def start_server():
         stdout=log, stderr=subprocess.STDOUT)
     for _ in range(600):
         if server_proc.poll() is not None:
-            raise RuntimeError(f"server exited, check {OUT}/llama_server.log")
-        if server_alive():
+            dump_diag()
+            raise RuntimeError(f"server exited during startup, check {OUT}/llama_server.log")
+        if server_ready():
             return
         time.sleep(1)
     raise RuntimeError(f"server failed to start, check {OUT}/llama_server.log")
@@ -281,7 +360,7 @@ def print_usage():
     print("=" * 60)
     print(f'''
 from openai import OpenAI
-client = OpenAI(base_url="{public_url}/v1", api_key="sk-local")
+client = OpenAI(base_url="{public_url}/v1", api_key="sk-local", timeout=600)
 r = client.chat.completions.create(model="{MODEL_ALIAS}", messages=[{{"role":"user","content":"Hello"}}])
 print(r.choices[0].message.content)
 ''', flush=True)
@@ -293,16 +372,30 @@ warm_model()
 start_tunnel()
 print_usage()
 
-# ---------- 5. watchdog: never exits ----------
+# ---------- 5. watchdog: never exits, never kills a busy server ----------
 tick = 0
+port_fails = 0
 while True:
     time.sleep(30)
     tick += 1
     try:
-        if not server_alive():
-            print(time.strftime("%H:%M:%S"), "server down, restarting", flush=True)
+        if server_proc.poll() is not None:
+            print(time.strftime("%H:%M:%S"), f"server process EXITED (code {server_proc.returncode}), restarting", flush=True)
+            dump_diag()
             start_server()
             warm_model()
+            port_fails = 0
+        elif not port_open():
+            port_fails += 1
+            print(time.strftime("%H:%M:%S"), f"port closed ({port_fails}/6)", flush=True)
+            if port_fails >= 6:   # ~3 minutes of closed port
+                dump_diag()
+                start_server()
+                warm_model()
+                port_fails = 0
+        else:
+            port_fails = 0   # port open = alive, even if busy generating
+
         if tunnel_proc.poll() is not None:
             print(time.strftime("%H:%M:%S"), "tunnel down, restarting", flush=True)
             start_tunnel()
@@ -310,4 +403,4 @@ while True:
     except Exception as e:
         print("watchdog error:", repr(e), flush=True)
     if tick % 10 == 0:
-        print(time.strftime("%H:%M:%S"), "alive |", public_url, flush=True)
+        print(time.strftime("%H:%M:%S"), "server", "UP" if port_open() else "DOWN", "|", public_url, flush=True)

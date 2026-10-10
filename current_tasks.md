@@ -160,7 +160,7 @@ its own config, and no dependency on the medical harness.
 ## Now / next / later
 
 ### Now — in this session
-1. `current_tasks.md` (this file), `graphrag_plan.md`, and the `Plan.md` track entry.
+1. `current_tasks.md` (this file), `docs/graphrag_plan.md`, and the `Plan.md` track entry.
 2. Core package, **stdlib only, no network, no API key needed**: config,
    normalization + validation gate, chunking, graph store, checkpoint.
 3. LLM extraction adapter (`graphrag/llm.py`) + cost ledger (`graphrag/cost.py`),
@@ -175,7 +175,7 @@ its own config, and no dependency on the medical harness.
 ### Later
 7. Query layer — Q0 probe, Q1 route (Laya U7), Q2 two-door seeds, Q3 walk∪fetch,
    Q4 rerank (U5), Q5 narrate, Q6 guard (U8), QG global.
-8. **Main medical corpus via GitHub Actions** — see `graphrag_plan.md`.
+8. **Main medical corpus via GitHub Actions** — see `docs/graphrag_plan.md`.
 
 ---
 

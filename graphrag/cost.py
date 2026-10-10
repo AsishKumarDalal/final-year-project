@@ -1,7 +1,7 @@
 """Cost ledger for Track B indexing.
 
 Every LLM call records its tokens and latency here, tagged by stage. This is
-the data behind ``make rag-cost`` (graphrag_plan.md §4): tokens and cost per
+the data behind ``make rag-cost`` (docs/graphrag_plan.md §4): tokens and cost per
 indexing stage, measured rather than estimated.
 
 The ledger never sees the API key — only token counts.
