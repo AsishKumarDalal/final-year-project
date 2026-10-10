@@ -11,7 +11,7 @@ A **Python medical decision-support harness** — spec in `PROMPT.md`, milestone
 | Track | What | Lives in | Spec / design |
 |---|---|---|---|
 | A | Medical harness (**the product**: triage, escalation, cited explanation) | `src/medharness/` | `PROMPT.md`, `Plan.md` M0–M12 |
-| B | GraphRAG indexer (builds the index A reads) | `graphrag/` | `graphrag_plan.md`, `docs/rag_docs/` |
+| B | GraphRAG indexer (builds the index A reads) | `graphrag/` | `docs/graphrag_plan.md`, `docs/rag_docs/` |
 
 A never imports B's code; B never imports A. The one interface is data: B writes
 the Qdrant+Neo4j index offline; A's `search_external_docs` reads it at query time.
@@ -26,7 +26,7 @@ the Qdrant+Neo4j index offline; A's `search_external_docs` reads it at query tim
    `Plan.md` §2, then `current_tasks.md` (red dots need a human).
 2. Setup: `docs/runbook.md` (Laya + Docker stores + `.env`). Architecture:
    `docs/architecture.md`.
-3. `PRODUCT.md` is the user-facing pitch; the engineering build log is
+3. `docs/PRODUCT.md` is the user-facing pitch; the engineering build log is
    `docs/decisions.md`.
 
 ## When to read what (everything else is on-demand)
@@ -77,7 +77,7 @@ decision, stop and ask.
   `out/`; claim un-evidenced accuracy; add a dependency without approval; use real
   patient data. A failing blocking metric is a **finding** — publish it (§14.3).
 - Scope: build only the milestone's Build list; the rest goes in `current_tasks.md`.
-  Docs land in the same commit as their code. `README.md`/`PRODUCT.md` never overstate.
+  Docs land in the same commit as their code. `README.md`/`docs/PRODUCT.md` never overstate.
 
 ## Notes
 
